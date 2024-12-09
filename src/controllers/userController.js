@@ -93,26 +93,23 @@ const workoutController = async (req, res, next) => {
             return next(createError(400, "Workout string is missing"));
         }
 
-        // Split workoutString into lines
         const eachWorkout = workoutString.split("\n").map((line) => line.trim());
         const parsedWorkouts = [];
         let currentCategory = "";
 
-        // Loop through each line to parse workout details
+        // Parse workout details
         for (let i = 0; i < eachWorkout.length; i++) {
             const line = eachWorkout[i];
             if (line.startsWith("#")) {
-                // Line is a category (e.g., #Legs)
-                currentCategory = line.substring(1).trim();
+                currentCategory = line.substring(1).trim(); // Extract category
             } else if (line.startsWith("-")) {
-                // Line contains workout details
-                const workoutDetails = eachWorkout.slice(i, i + 4); // Get next four lines for workout details
+                const workoutDetails = eachWorkout.slice(i, i + 4);
 
                 if (workoutDetails.length < 4) {
                     return next(createError(400, `Incomplete workout details for category "${currentCategory}"`));
                 }
 
-                const workoutName = workoutDetails[0].substring(1).trim(); // Remove leading "-"
+                const workoutName = workoutDetails[0].substring(1).trim();
                 const setsReps = workoutDetails[1].trim();
                 const weight = workoutDetails[2].trim();
                 const duration = workoutDetails[3].trim();
@@ -130,10 +127,10 @@ const workoutController = async (req, res, next) => {
                     reps: isNaN(reps) ? 0 : reps,
                     weight: isNaN(parsedWeight) ? 0 : parsedWeight,
                     duration: isNaN(parsedDuration) ? 0 : parsedDuration,
-                    caloriesBurned: calculateCaloriesBurnt({ duration: parsedDuration, weight: parsedWeight })
+                    caloriesBurned: calculateCaloriesBurnt({ duration: parsedDuration, weight: parsedWeight }),
                 });
 
-                i += 3; // Skip the next three lines since we already processed them
+                i += 3; // Skip the next three lines since they are already processed
             } else {
                 return next(createError(400, `Unexpected line format: "${line}"`));
             }
@@ -143,18 +140,48 @@ const workoutController = async (req, res, next) => {
             return next(createError(400, "No valid workouts found"));
         }
 
-        // Save each parsed workout to the database, allowing duplicates
-        const savedWorkouts = await workoutModel.insertMany(parsedWorkouts, { ordered: false });
+        // Query the database for existing workouts with the same name, user, and category
+        const existingWorkouts = await workoutModel.find({
+            user: userId,
+            category: { $in: parsedWorkouts.map((w) => w.category) },
+            workoutName: { $in: parsedWorkouts.map((w) => w.workoutName) },
+        });
+
+        // Create a map of existing workouts to avoid duplicates
+        const existingWorkoutsMap = new Map(
+            existingWorkouts.map((w) => `${w.user}_${w.category}_${w.workoutName}`)
+        );
+
+        // Filter out duplicates
+        const uniqueWorkouts = parsedWorkouts.filter(
+            (w) => !existingWorkoutsMap.has(`${w.user}_${w.category}_${w.workoutName}`)
+        );
+
+        if (uniqueWorkouts.length === 0) {
+            return res.status(200).json({
+                message: "No new workouts to add. All workouts are already saved.",
+            });
+        }
+
+        // Insert unique workouts into the database
+        const savedWorkouts = await workoutModel.insertMany(uniqueWorkouts, { ordered: true });
 
         return res.status(201).json({
             message: "Workouts added successfully",
-            workouts: savedWorkouts
+            workouts: savedWorkouts,
         });
     } catch (error) {
+        if (error.code === 11000) {
+            return next(createError(409, "Duplicate workout detected. Ensure unique workout names within the same user-category."));
+        }
         console.error(error);
         return next(createError(500, error.message));
     }
+    
 };
+
+
+
 
 const getUserDashboard = async (req, res, next) => {
     try {

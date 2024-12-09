@@ -4,6 +4,8 @@ const colors = require("colors");
 const dotenv = require("dotenv");
 const connectDb = require("./config/connectDb");
 const userRoutes = require("./routes/userRoute");
+const blogRoutes = require("./routes/blogRoute");
+
 
 //config dot env file
 dotenv.config();
@@ -22,7 +24,7 @@ app.use(express.urlencoded({ extended: true })); // for form data
 //routes
 // user routes
 app.use('/api/v1/users', userRoutes); // Corrected path
-
+app.use("/api/v1/blogs", blogRoutes);
 
 // error handler
 app.use((err, req, res) => {
