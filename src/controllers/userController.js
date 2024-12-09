@@ -114,8 +114,7 @@ const workoutController = async (req, res, next) => {
                 const weight = workoutDetails[2].trim();
                 const duration = workoutDetails[3].trim();
 
-                const sets = parseInt(setsReps.split("setsX")[0].trim());
-                const reps = parseInt(setsReps.split("setsX")[1]?.split("reps")[0].trim());
+                const [sets, reps] = setsReps.split("X").map(num => parseInt(num.trim()));
                 const parsedWeight = parseFloat(weight.split("kg")[0].trim());
                 const parsedDuration = parseFloat(duration.split("min")[0].trim());
 
@@ -149,38 +148,44 @@ const workoutController = async (req, res, next) => {
 
         // Create a map of existing workouts to avoid duplicates
         const existingWorkoutsMap = new Map(
-            existingWorkouts.map((w) => `${w.user}_${w.category}_${w.workoutName}`)
+            existingWorkouts.map((w) => [`${w.user}_${w.category}_${w.workoutName}`, w])
         );
 
-        // Filter out duplicates
-        const uniqueWorkouts = parsedWorkouts.filter(
-            (w) => !existingWorkoutsMap.has(`${w.user}_${w.category}_${w.workoutName}`)
-        );
+        // Filter out duplicates and update existing workouts
+        const uniqueWorkouts = [];
+        const updatedWorkouts = [];
 
-        if (uniqueWorkouts.length === 0) {
-            return res.status(200).json({
-                message: "No new workouts to add. All workouts are already saved.",
-            });
+        for (const workout of parsedWorkouts) {
+            const key = `${workout.user}_${workout.category}_${workout.workoutName}`;
+            if (existingWorkoutsMap.has(key)) {
+                const existingWorkout = existingWorkoutsMap.get(key);
+                existingWorkout.sets = workout.sets;
+                existingWorkout.reps = workout.reps;
+                existingWorkout.weight = workout.weight;
+                existingWorkout.duration = workout.duration;
+                existingWorkout.caloriesBurned = workout.caloriesBurned;
+                updatedWorkouts.push(existingWorkout);
+            } else {
+                uniqueWorkouts.push(workout);
+            }
         }
+
+        // Save updated workouts
+        await Promise.all(updatedWorkouts.map(workout => workout.save()));
 
         // Insert unique workouts into the database
-        const savedWorkouts = await workoutModel.insertMany(uniqueWorkouts, { ordered: true });
+        const savedWorkouts = await workoutModel.insertMany(uniqueWorkouts);
 
         return res.status(201).json({
-            message: "Workouts added successfully",
-            workouts: savedWorkouts,
+            message: "Workouts added/updated successfully",
+            newWorkouts: savedWorkouts,
+            updatedWorkouts: updatedWorkouts,
         });
     } catch (error) {
-        if (error.code === 11000) {
-            return next(createError(409, "Duplicate workout detected. Ensure unique workout names within the same user-category."));
-        }
         console.error(error);
         return next(createError(500, error.message));
     }
-    
 };
-
-
 
 
 const getUserDashboard = async (req, res, next) => {
@@ -335,7 +340,7 @@ const calculateCaloriesBurnt = (workoutDetails) => {
     const durationInMinutes = workoutDetails.duration || 0;
     const weightInKg = workoutDetails.weight || 0;
     const caloriesBurntPerMinute = 5;
-    return (durationInMinutes * caloriesBurntPerMinute * (weightInKg / 10)).toFixed(2);
+    return parseFloat((durationInMinutes * caloriesBurntPerMinute * (weightInKg / 10)).toFixed(2));
 };
 
 
