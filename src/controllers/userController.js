@@ -97,39 +97,43 @@ const workoutController = async (req, res, next) => {
         const parsedWorkouts = [];
         let currentCategory = "";
 
-        // Parse workout details
         for (let i = 0; i < eachWorkout.length; i++) {
             const line = eachWorkout[i];
+
             if (line.startsWith("#")) {
-                currentCategory = line.substring(1).trim(); // Extract category
+                currentCategory = line.substring(1).trim();
             } else if (line.startsWith("-")) {
-                const workoutDetails = eachWorkout.slice(i, i + 4);
+                const workoutName = line.substring(1).trim();
 
-                if (workoutDetails.length < 4) {
-                    return next(createError(400, `Incomplete workout details for category "${currentCategory}"`));
+                if (i + 3 < eachWorkout.length) {
+                    const setsReps = eachWorkout[i + 1].trim();
+                    const weight = eachWorkout[i + 2].trim();
+                    const duration = eachWorkout[i + 3].trim();
+
+                    const date = new Date();
+
+                    const [sets, reps] = setsReps.split("X").map(num => parseInt(num.trim()));
+                    const parsedWeight = parseFloat(weight.split("kg")[0].trim());
+                    const parsedDuration = parseFloat(duration.split("min")[0].trim());
+
+                    const caloriesBurned = calculateCaloriesBurnt({ duration: parsedDuration, weight: parsedWeight });
+
+                    parsedWorkouts.push({
+                        user: userId,
+                        category: currentCategory,
+                        workoutName,
+                        sets: isNaN(sets) ? 0 : sets,
+                        reps: isNaN(reps) ? 0 : reps,
+                        weight: isNaN(parsedWeight) ? 0 : parsedWeight,
+                        duration: isNaN(parsedDuration) ? 0 : parsedDuration,
+                        date,
+                        caloriesBurned
+                    });
+
+                    i += 3;
+                } else {
+                    return next(createError(400, `Incomplete workout details for "${workoutName}"`));
                 }
-
-                const workoutName = workoutDetails[0].substring(1).trim();
-                const setsReps = workoutDetails[1].trim();
-                const weight = workoutDetails[2].trim();
-                const duration = workoutDetails[3].trim();
-
-                const [sets, reps] = setsReps.split("X").map(num => parseInt(num.trim()));
-                const parsedWeight = parseFloat(weight.split("kg")[0].trim());
-                const parsedDuration = parseFloat(duration.split("min")[0].trim());
-
-                parsedWorkouts.push({
-                    user: userId,
-                    category: currentCategory,
-                    workoutName,
-                    sets: isNaN(sets) ? 0 : sets,
-                    reps: isNaN(reps) ? 0 : reps,
-                    weight: isNaN(parsedWeight) ? 0 : parsedWeight,
-                    duration: isNaN(parsedDuration) ? 0 : parsedDuration,
-                    caloriesBurned: calculateCaloriesBurnt({ duration: parsedDuration, weight: parsedWeight }),
-                });
-
-                i += 3; // Skip the next three lines since they are already processed
             } else {
                 return next(createError(400, `Unexpected line format: "${line}"`));
             }
@@ -139,54 +143,17 @@ const workoutController = async (req, res, next) => {
             return next(createError(400, "No valid workouts found"));
         }
 
-        // Query the database for existing workouts with the same name, user, and category
-        const existingWorkouts = await workoutModel.find({
-            user: userId,
-            category: { $in: parsedWorkouts.map((w) => w.category) },
-            workoutName: { $in: parsedWorkouts.map((w) => w.workoutName) },
-        });
-
-        // Create a map of existing workouts to avoid duplicates
-        const existingWorkoutsMap = new Map(
-            existingWorkouts.map((w) => [`${w.user}_${w.category}_${w.workoutName}`, w])
-        );
-
-        // Filter out duplicates and update existing workouts
-        const uniqueWorkouts = [];
-        const updatedWorkouts = [];
-
-        for (const workout of parsedWorkouts) {
-            const key = `${workout.user}_${workout.category}_${workout.workoutName}`;
-            if (existingWorkoutsMap.has(key)) {
-                const existingWorkout = existingWorkoutsMap.get(key);
-                existingWorkout.sets = workout.sets;
-                existingWorkout.reps = workout.reps;
-                existingWorkout.weight = workout.weight;
-                existingWorkout.duration = workout.duration;
-                existingWorkout.caloriesBurned = workout.caloriesBurned;
-                updatedWorkouts.push(existingWorkout);
-            } else {
-                uniqueWorkouts.push(workout);
-            }
-        }
-
-        // Save updated workouts
-        await Promise.all(updatedWorkouts.map(workout => workout.save()));
-
-        // Insert unique workouts into the database
-        const savedWorkouts = await workoutModel.insertMany(uniqueWorkouts);
+        const savedWorkouts = await workoutModel.insertMany(parsedWorkouts);
 
         return res.status(201).json({
-            message: "Workouts added/updated successfully",
-            newWorkouts: savedWorkouts,
-            updatedWorkouts: updatedWorkouts,
+            message: "Workouts added successfully",
+            workouts: savedWorkouts
         });
     } catch (error) {
         console.error(error);
         return next(createError(500, error.message));
     }
 };
-
 
 const getUserDashboard = async (req, res, next) => {
     try {
@@ -195,7 +162,7 @@ const getUserDashboard = async (req, res, next) => {
             return next(createError(400, "User ID is missing from the request."));
         }
 
-        const user = await userModel.findById(userId);  // Corrected to userModel
+        const user = await userModel.findById(userId);
         if (!user) {
             return next(createError(404, "User not found"));
         }
@@ -204,35 +171,31 @@ const getUserDashboard = async (req, res, next) => {
         const startToday = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
         const endToday = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + 1);
 
-        // Calculate total calories burnt for today
-        const totalCaloriesBurnt = await workoutModel.aggregate([
-            { $match: { user: user._id, date: { $gte: startToday, $lt: endToday } } },
-            { $group: { _id: null, totalCaloriesBurnt: { $sum: "$caloriesBurned" } } },
-        ]);
-
-        const totalWorkouts = await workoutModel.countDocuments({
-            user: userId,
-            date: { $gte: startToday, $lt: endToday },
+        const todayWorkouts = await workoutModel.find({
+            user: user._id,
+            date: { $gte: startToday, $lt: endToday }
         });
 
-        const avgCaloriesBurntPerWorkout = totalWorkouts > 0
-            ? (totalCaloriesBurnt[0]?.totalCaloriesBurnt || 0) / totalWorkouts
-            : 0;
+        const totalCaloriesBurnt = todayWorkouts.reduce((sum, workout) => sum + workout.caloriesBurned, 0);
+        const totalWorkouts = todayWorkouts.length;
+        const avgCaloriesBurntPerWorkout = totalWorkouts > 0 ? totalCaloriesBurnt / totalWorkouts : 0;
 
-        const categoryCalories = await workoutModel.aggregate([
-            { $match: { user: user._id, date: { $gte: startToday, $lt: endToday } } },
-            { $group: { _id: "$category", totalCaloriesBurnt: { $sum: "$caloriesBurned" } } },
-        ]);
+        const categoryCalories = todayWorkouts.reduce((acc, workout) => {
+            if (!acc[workout.category]) {
+                acc[workout.category] = 0;
+            }
+            acc[workout.category] += workout.caloriesBurned;
+            return acc;
+        }, {});
 
-        const pieChartData = categoryCalories.map((category, index) => ({
+        const pieChartData = Object.entries(categoryCalories).map(([category, calories], index) => ({
             id: index,
-            value: category.totalCaloriesBurnt,
-            label: category._id,
+            value: calories,
+            label: category,
         }));
 
         const weeks = [];
         const caloriesBurnt = [];
-        const daysData = [];
 
         for (let i = 6; i >= 0; i--) {
             const date = new Date(currentDate.getTime() - i * 24 * 60 * 60 * 1000);
@@ -241,23 +204,17 @@ const getUserDashboard = async (req, res, next) => {
             const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
             const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 
-            daysData.push(
-                workoutModel.aggregate([
-                    { $match: { user: user._id, date: { $gte: startOfDay, $lt: endOfDay } } },
-                    { $group: { _id: null, totalCaloriesBurnt: { $sum: "$caloriesBurned" } } },
-                ])
-            );
+            const dayWorkouts = await workoutModel.find({
+                user: user._id,
+                date: { $gte: startOfDay, $lt: endOfDay }
+            });
+
+            const dayCalories = dayWorkouts.reduce((sum, workout) => sum + workout.caloriesBurned, 0);
+            caloriesBurnt.push(dayCalories);
         }
 
-        const weekData = await Promise.all(daysData);
-
-        weekData.forEach((data, index) => {
-            caloriesBurnt.push(data.length > 0 ? data[0].totalCaloriesBurnt : 0);
-        });
-
-        // Send the final JSON response
         return res.status(200).json({
-            totalCaloriesBurnt: totalCaloriesBurnt.length > 0 ? totalCaloriesBurnt[0].totalCaloriesBurnt : 0,
+            totalCaloriesBurnt,
             totalWorkouts,
             avgCaloriesBurntPerWorkout,
             totalWeeksCaloriesBurnt: {
