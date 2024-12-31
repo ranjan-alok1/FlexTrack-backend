@@ -1,73 +1,73 @@
-// controllers/blogController.js
 const Blog = require("../models/blogModel");
+const User = require("../models/userModel");
 const createError = require("../error");
-
-// Create a new blog
-const createBlog = async (req, res, next) => {
-    try {
-        const { title, content, tags } = req.body;
-
-        if (!title || !content) {
-            return next(createError(400, "Title and content are required"));
-        }
-
-        const blog = new Blog({
-            title,
-            content,
-            tags,
-            author: req.user.id, // From token middleware
-        });
-
-        const savedBlog = await blog.save();
-
-        return res.status(201).json({
-            success: true,
-            message: "Blog created successfully",
-            blog: savedBlog,
-        });
-    } catch (err) {
-        next(err);
-    }
-};
 
 // Get all blogs
 const getAllBlogs = async (req, res, next) => {
     try {
         const blogs = await Blog.find()
-            .populate("author", "name email img") // Populate author details
-            .sort({ createdAt: -1 });
+            .select('title content createdAt')  // Select specific fields
+            .populate('author', 'name email')   // Populate only needed user fields
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Transform the data to handle missing authors
+        const formattedBlogs = blogs.map(blog => ({
+            _id: blog._id,
+            title: blog.title,
+            content: blog.content,
+            createdAt: blog.createdAt,
+            author: blog.author || { name: 'Anonymous' }
+        }));
 
         return res.status(200).json({
             success: true,
-            blogs,
+            blogs: formattedBlogs,
+        });
+    } catch (err) {
+        console.error('Error in getAllBlogs:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching blogs",
+            error: err.message
+        });
+    }
+};
+
+// Create a new blog
+const createBlog = async (req, res, next) => {
+    try {
+        const { title, content } = req.body;
+
+        if (!title || !content) {
+            return next(createError(400, "Title and content are required"));
+        }
+
+        // Create new blog
+        const blog = new Blog({
+            title,
+            content,
+            author: req.user.id,  // From verifyToken middleware
+        });
+
+        const savedBlog = await blog.save();
+
+        // Populate author details before sending response
+        const populatedBlog = await Blog.findById(savedBlog._id)
+            .populate('author', 'name email')
+            .lean();
+
+        return res.status(201).json({
+            success: true,
+            message: "Blog created successfully",
+            blog: populatedBlog,
         });
     } catch (err) {
         next(err);
     }
 };
 
-// // Get a blog by ID
-// const getBlogById = async (req, res, next) => {
-//     try {
-//         const blogId = req.params.id;
-
-//         const blog = await Blog.findById(blogId).populate("author", "name email img");
-
-//         if (!blog) {
-//             return next(createError(404, "Blog not found"));
-//         }
-
-//         return res.status(200).json({
-//             success: true,
-//             blog,
-//         });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
 module.exports = {
     createBlog,
     getAllBlogs,
-    // getBlogById,
-};
+}; 
