@@ -6,28 +6,31 @@ const connectDb = require("./config/connectDb");
 const userRoutes = require("./routes/userRoute");
 const blogRoutes = require("./routes/blogRoute");
 
-
-//config dot env file
 dotenv.config();
 
-
-//rest object
 const app = express();
 
-//middleware
-app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true })); // for form data
+// Middleware
+app.use(
+    cors({
+        origin: ["http://localhost:3000", "https://flex-track-frontend.vercel.app"], 
+        methods: ["GET", "POST", "PUT", "DELETE"],
+        credentials: true, 
+    })
+);
 
+app.use(express.json({ limit: "50mb" })); // Allow JSON parsing with size limits
+app.use(express.urlencoded({ extended: true })); // Allow form data
 
+// Routes
+// User routes
+app.use("/api/v1/users", userRoutes);
 
-//routes
-// user routes
-app.use('/api/v1/users', userRoutes); // Corrected path
+// Blog routes
 app.use("/api/v1/blogs", blogRoutes);
 
-// error handler
-app.use((err, req, res) => {
+// Error handling middleware
+app.use((err, req, res, next) => {
     const status = err.status || 500;
     const message = err.message || "Something went wrong";
     return res.status(status).json({
@@ -37,19 +40,17 @@ app.use((err, req, res) => {
     });
 });
 
-//ports
-const PORT = 8080 || process.env.PORT;
+const PORT = process.env.PORT || 8080;
 
-//listen
 const startServer = async () => {
     try {
-        //database call
-        connectDb();
+        // Connect to the database
+        await connectDb();
         app.listen(PORT, () => {
-            console.log(`listening on port ${PORT}`);
+            console.log(`Server is running on port ${PORT}`.green);
         });
     } catch (error) {
-        console.log(error);
+        console.error(`Error while starting server: ${error.message}`.red);
     }
 };
 
