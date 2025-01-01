@@ -14,43 +14,43 @@ const app = express();
 app.use(
     cors({
         origin: ["http://localhost:3000", "https://flex-track-frontend.vercel.app"], 
-        methods: ["GET", "POST", "PUT", "DELETE"],
+        methods: ["GET", "POST", "PUT", "DELETE"], 
         credentials: true, 
     })
 );
+app.options("*", cors()); // Handle preflight requests globally
 
-app.use(express.json({ limit: "50mb" })); // Allow JSON parsing with size limits
-app.use(express.urlencoded({ extended: true })); // Allow form data
+app.use(express.json({ limit: "50mb" })); // Allow JSON payloads up to 50MB
+app.use(express.urlencoded({ extended: true })); // Parse URL-encoded data
 
 // Routes
-// User routes
 app.use("/api/v1/users", userRoutes);
-
-// Blog routes
 app.use("/api/v1/blogs", blogRoutes);
 
-// Error handling middleware
 app.use((err, req, res, next) => {
     const status = err.status || 500;
     const message = err.message || "Something went wrong";
-    return res.status(status).json({
+    console.error(`[Error] ${status} - ${message}`.red);
+    res.status(status).json({
         success: false,
         status,
         message,
     });
 });
 
+// Port
 const PORT = process.env.PORT || 8080;
 
+// Start Server
 const startServer = async () => {
     try {
-        // Connect to the database
-        await connectDb();
+        await connectDb(); 
         app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`.green);
+            console.log(`Server running on port ${PORT}`.green.bold);
         });
     } catch (error) {
-        console.error(`Error while starting server: ${error.message}`.red);
+        console.error(`Error while starting server: ${error.message}`.red.bold);
+        process.exit(1);
     }
 };
 
